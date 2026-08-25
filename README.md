@@ -1,4 +1,4 @@
-# Mapping priority areas for Wolbachia-based malaria control across Sub-Saharan Africa
+# Mapping priority areas for _Wolbachia_-based malaria control across Sub-Saharan Africa
 
 ## Overview
 
