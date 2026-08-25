@@ -1,4 +1,4 @@
-# Wolbachia_malaria_SSA
+# Mapping priority areas for Wolbachia-based malaria control across Sub-Saharan Africa
 
 ## Overview
 
@@ -21,10 +21,18 @@ The /R folder contains six Shiny applications. Each app includes a Map tab, an I
 
 ### Data files
 
-The /data folder contains all input raster files used in the analysis. See the Data sources section below for details of each file and its original source.
+The /data folder contains all input raster files used in the analysis. See the Data sources section below for details of each file and its source.
 
 ## Data sources 
 
 | File | Source | Description |
 | --- | --- | --- |
-| An. arabiensis.tif | Malaria Atlas Project | _An. arabiensis_ occurrence probability (5km) |
+| An. arabiensis.tif | [Malaria Atlas Project](https://malariaatlas.org/) | _An. arabiensis_ occurrence probability (5km) |
+| An. coluzzii.tif | Malaria Atlas Project | _An. coluzzii_ occurrence probability (5km) |
+| An. moucheti.tif | Malaria Atlas Project | _An. moucheti_ occurrence probability (5km) |
+| An. gambiae.tif | Malaria Atlas Project | _An. gambiae s.s._ occurrence probability (5km) |
+| An. stephensi.tif | Malaria Atlas Project | _An. stephensi_ occurrence probability (5km) |
+| PfPR_mean.tif | Malaria Atlas Project | Mean PfPR 2000-2020 (5km) |
+| ITN_use_rate.tif | Malaria Atlas Project | ITN use rate (5km) |
+| Pf_incidence_mean_2000.tif | Malaria Atlas Project | Mean Pf incidence rate 2000 (5km) |
+| POP_MEAN_2000_2020_5km.tif | World Pop | Mean population count 2000–2020 aggregated to 5km |
