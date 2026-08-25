@@ -44,6 +44,6 @@ Each pixel across sub-Saharan Africa is assigned a priority tier based on an add
 
 | Use case | Parameter scored | Tier 1 creiteria |
 | --- | --- | --- |
-| Trial 1a | PfPR | Low |
+| []{rowspan=3} 'Trial 1a' | PfPR | Low |
 |          | Dominance | High |
 |          | ITN | Low |
