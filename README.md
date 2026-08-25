@@ -49,3 +49,12 @@ Each pixel across sub-Saharan Africa is assigned a priority tier based on an add
 | Use case 2 | PfPR, ITN, Dominance | High, High, Moderate |
 | Use case 3 | PfPR, ITN, Dominance | Very low, High, Moderate |
 | Use case 4 | PfPR, Stephensi occurence | Moderate, High |
+
+Default scoring thresholds are described in Table 2 of the paper. All thresholds are adjustable within the Shiny applications.
+
+## How to run
+
+### Requirements
+
+R version 4.3 or later. Install required packages:
+install.packages(c("terra", "sf", "shiny", "plotly", "ggplot2"))
