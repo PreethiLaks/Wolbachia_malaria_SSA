@@ -57,4 +57,6 @@ Default scoring thresholds are described in Table 2 of the paper. All thresholds
 ### Requirements
 
 R version 4.3 or later. Install required packages:
-install.packages(c("terra", "sf", "shiny", "plotly", "ggplot2"))
+
+` install.packages(c("terra", "sf", "shiny", "plotly", "ggplot2")) `
+
