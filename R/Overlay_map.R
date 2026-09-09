@@ -302,6 +302,13 @@ server <- function(input, output, session) {
   
   # ── Tab 2: Mozambique zoom ────────────────────────────────────
   output$map_moz <- renderPlot({
+    # Layout: main map + small locator in bottom-right corner
+    lay_mat <- matrix(c(1,1,1,
+                        1,1,1,
+                        1,1,2), nrow = 3, byrow = TRUE)
+    layout(lay_mat)
+    
+    # Main Mozambique map
     par(mar = c(0.2, 0.2, 0.2, 0.2), bg = "white")
     
     # Neighbours first
@@ -333,14 +340,8 @@ server <- function(input, output, session) {
            cex = 0.75, col = "grey20", font = 1)
     }
     
-    # Locator inset — Africa silhouette with Mozambique in red
-    fig_b  <- par("fig")
-    ix1 <- fig_b[1] + 0.60 * (fig_b[2] - fig_b[1])
-    ix2 <- fig_b[2] - 0.01
-    iy1 <- fig_b[4] - 0.38 * (fig_b[4] - fig_b[3])
-    iy2 <- fig_b[4] - 0.01
-    
-    par(fig = c(ix1, ix2, iy1, iy2), mar = c(0,0,0,0), new = TRUE, bg = "white")
+    # Locator inset panel
+    par(mar = c(0.3, 0.3, 0.3, 0.3), bg = "white")
     plot(AFRICA0_A,
          col    = "#d0d0d0",
          border = "#aaaaaa",
