@@ -13,7 +13,7 @@ paths <- list(
   itn  = file.path(data_dir, "ITN_use_rate.tif"),
   inc  = file.path(data_dir, "Pf_Incidence_mean_2000.tif"),
   pop  = file.path(data_dir, "POP_MEAN_2000_2020_5km.tif"),
-  ghs  = file.path("Data", "GHS_SMOD_E2025_GLOBE_R2023A_54009_1000_V2_0.tif"),
+  ghs  = file.path(data_dir, "GHS_SMOD_MEAN_2000_2025.tif"),
   gadm = file.path(data_dir, "gadm_ssa.gpkg")
 )
 
