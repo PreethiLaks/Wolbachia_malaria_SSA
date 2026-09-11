@@ -61,3 +61,7 @@ R version 4.3 or later. Install required packages:
 
 ` install.packages(c("terra", "sf", "shiny", "plotly", "ggplot2")) `
 
+### Running the apps
+
+setwd("path/to/Wolbachia_malaria_SSA")
+shiny::runApp("R/Demo_trial_1a.R")
