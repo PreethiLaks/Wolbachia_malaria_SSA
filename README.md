@@ -36,7 +36,8 @@ The /data folder contains all input raster files used in the analysis. See the D
 | ITN_use_rate.tif | [Malaria Atlas Project](https://malariaatlas.org/) | ITN use rate (5km) |
 | Pf_incidence_mean_2000.tif | [Malaria Atlas Project](https://malariaatlas.org/) | Mean Pf incidence rate 2000 (5km) |
 | POP_MEAN_2000_2020_5km.tif | [World Pop](https://hub.worldpop.org/geodata/listing?id=64) | Mean population count 2000–2020 aggregated to 5km |
-| GHS_SMOD_E2025_GLOBE_R2023A_54009_1000_V2_0.tif | [Global Human Settlement Layer](https://human-settlement.emergency.copernicus.eu/ghs_smod2023.php) | Urban/rural typology 2025 (1km) |
+| GHS_SMOD_2025.tif | [Global Human Settlement Layer](https://human-settlement.emergency.copernicus.eu/ghs_smod2023.php) | Urban/rural typology 2025 (1km) |
+| gadm_ssa.gpkg | [GADMv4.1](https://gadm.org/) | Administrative boundaries (ADM0 and ADM1) cropped to sub-Saharan Africa |
 
 ## Analytical framework
 
