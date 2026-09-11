@@ -21,7 +21,7 @@ The /R folder contains six Shiny applications. Each app includes a Map tab, an I
 
 ### Data files
 
-The /data folder contains all input raster files used in the analysis. See the Data sources section below for details of each file and its source.
+The /R/data folder contains all input raster files used in the analysis. See the Data sources section below for details of each file and its source.
 
 ## Data sources 
 
