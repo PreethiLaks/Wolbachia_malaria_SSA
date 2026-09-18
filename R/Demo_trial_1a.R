@@ -6,6 +6,7 @@ library(terra)
 library(sf)
 library(plotly)
 
+# Data folder must be in the same directory as this script
 data_dir <- "data"
 
 paths <- list(
@@ -78,19 +79,76 @@ AFRICA1_A <- if (!identical(crs(AFRICA1), crs(TEMPLATE))) project(AFRICA1, crs(T
 PFPR_ALIGNED <- to01(fast_align(PFPR_MEAN, TEMPLATE))
 ITN_ALIGNED  <- to01(fast_align(rast(paths$itn), TEMPLATE))
 INC_ALIGNED  <- fast_align(rast(paths$inc), TEMPLATE)
-POP_ALIGNED  <- resample(rast(paths$pop), TEMPLATE, method = "sum")
+POP_ALIGNED  <- fast_align(rast(paths$pop), TEMPLATE)
 
 BURDEN_GLOBAL <- POP_ALIGNED * INC_ALIGNED
 CELL_AREA_KM2 <- cellSize(TEMPLATE, unit = "km")
 
-species_rasters <- list(
-  arabiensis = rast(paths$ara),
-  coluzzii   = rast(paths$col),
-  moucheti   = rast(paths$mou),
-  gambiae    = rast(paths$gam),
-  stephensi  = rast(paths$ste)
+sp_names <- c("arabiensis","coluzzii","moucheti","gambiae")
+
+# Map full species names to paths keys
+sp_path <- list(
+  arabiensis = paths$ara,
+  coluzzii   = paths$col,
+  moucheti   = paths$mou,
+  gambiae    = paths$gam,
+  stephensi  = paths$ste
 )
-SPECIES_ALIGNED <- lapply(species_rasters, function(r) fast_align(to01(r), TEMPLATE))
+
+# Pre-compute default tier rasters if not already saved
+compute_default_tier_uc1a <- function(sp) {
+  base_p  <- fast_align(to01(rast(sp_path[[sp]])), TEMPLATE)
+  base_p0 <- base_p; base_p0[is.na(base_p0)] <- 0
+  others  <- rast(lapply(setdiff(sp_names, sp), function(nm) {
+    r <- fast_align(to01(rast(sp_path[[nm]])), TEMPLATE); r[is.na(r)] <- 0; r
+  }))
+  dom       <- safe_div(base_p0, base_p0 + app(others, sum))
+  data_mask <- ifel(!is.na(PFPR_ALIGNED) & !is.na(ITN_ALIGNED) &
+                      !is.na(base_p) & base_p >= 0.10, 1, NA)
+  dm_v <- values(dom); valid_v <- values(data_mask)
+  itn_v <- values(ITN_ALIGNED); pfpr_v <- values(PFPR_ALIGNED)
+  
+  tv <- rep(NA_real_, length(dm_v))
+  tv[!is.na(valid_v) & !is.na(dm_v) & dm_v >= 0.70] <- 1
+  tv[!is.na(valid_v) & !is.na(dm_v) & dm_v >= 0.40 & dm_v < 0.70] <- 2
+  tv[!is.na(valid_v) & !is.na(dm_v) & dm_v <  0.40] <- 3
+  
+  ti <- rep(NA_real_, length(itn_v))
+  ti[!is.na(valid_v) & !is.na(itn_v) & itn_v <  0.60] <- 1
+  ti[!is.na(valid_v) & !is.na(itn_v) & itn_v >= 0.60 & itn_v < 0.80] <- 2
+  ti[!is.na(valid_v) & !is.na(itn_v) & itn_v >= 0.80] <- 3
+  
+  tp <- rep(NA_real_, length(pfpr_v))
+  tp[!is.na(valid_v) & !is.na(pfpr_v) & pfpr_v <  0.15] <- 1
+  tp[!is.na(valid_v) & !is.na(pfpr_v) & pfpr_v >= 0.15 & pfpr_v < 0.40] <- 2
+  tp[!is.na(valid_v) & !is.na(pfpr_v) & pfpr_v >= 0.40] <- 3
+  
+  sc  <- tv + ti + tp
+  out <- rep(NA_real_, length(sc))
+  out[!is.na(sc) & sc >= 3 & sc <= 4] <- 1
+  out[!is.na(sc) & sc >= 5 & sc <= 7] <- 2
+  out[!is.na(sc) & sc >= 8 & sc <= 9] <- 3
+  tier_r <- rast(TEMPLATE); values(tier_r) <- out
+  mask(tier_r, ADMIN0_A)
+}
+
+DEFAULT_TIERS <- lapply(setNames(sp_names, sp_names), function(sp) {
+  f <- file.path(data_dir, paste0("tier_uc1a_", sp, ".tif"))
+  if (!file.exists(f)) {
+    cat("Computing default tier raster for", sp, "...\n")
+    tier_r <- compute_default_tier_uc1a(sp)
+    tryCatch(
+      writeRaster(tier_r, f, overwrite = TRUE, datatype = "INT1U"),
+      error = function(e) cat("Note: could not save tier raster (read-only filesystem)\n")
+    )
+    tier_r
+  } else {
+    rast(f)
+  }
+})
+
+# Species rasters loaded on demand only when thresholds change
+species_rasters <- sp_path
 
 cat("Data loaded.\n")
 
@@ -307,57 +365,73 @@ server <- function(input, output, session) {
   output$pfpr_tier2_label <- renderText({ paste0(input$pfpr_t1, "\u2013", input$pfpr_t2, "%") })
   output$pfpr_tier3_label <- renderText({ paste0("\u2265", input$pfpr_t2, "%") })
   
+  # Default thresholds for UC1a
+  def_dom_t1  <- 70; def_dom_t2  <- 40
+  def_itn_t1  <- 60; def_itn_t2  <- 80
+  def_pfpr_t1 <- 15; def_pfpr_t2 <- 40
+  
+  # Check if user has changed any threshold from default
+  at_defaults <- reactive({
+    input$dom_t1  == def_dom_t1  & input$dom_t2  == def_dom_t2  &
+      input$itn_t1  == def_itn_t1  & input$itn_t2  == def_itn_t2  &
+      input$pfpr_t1 == def_pfpr_t1 & input$pfpr_t2 == def_pfpr_t2
+  })
+  
+  # Lazy-load species rasters and compute dominance only when needed
   dom_layers <- reactive({
     sp      <- input$species
-    base_p  <- SPECIES_ALIGNED[[sp]]; base_p[is.na(base_p)] <- 0
-    others  <- rast(lapply(setdiff(names(SPECIES_ALIGNED), sp),
-                           function(nm) { r <- SPECIES_ALIGNED[[nm]]; r[is.na(r)] <- 0; r }))
-    dom     <- safe_div(base_p, base_p + app(others, sum))
-    sp_raw  <- SPECIES_ALIGNED[[sp]]
+    base_p  <- fast_align(to01(rast(species_rasters[[sp]])), TEMPLATE)
+    base_p0 <- base_p; base_p0[is.na(base_p0)] <- 0
+    others  <- rast(lapply(setdiff(names(species_rasters), sp), function(nm) {
+      r <- fast_align(to01(rast(species_rasters[[nm]])), TEMPLATE)
+      r[is.na(r)] <- 0; r
+    }))
+    dom       <- safe_div(base_p0, base_p0 + app(others, sum))
     data_mask <- ifel(!is.na(PFPR_ALIGNED) & !is.na(ITN_ALIGNED) &
-                        !is.na(sp_raw) & sp_raw >= 0.10, 1, NA)
-    list(dom = dom, sp_raw = sp_raw, data_mask = data_mask)
+                        !is.na(base_p) & base_p >= 0.10, 1, NA)
+    list(dom = dom, data_mask = data_mask)
   }) |> bindCache(input$species)
   
   tier_weighted <- reactive({
+    sp <- input$species
+    
+    # Use pre-computed raster if at defaults — fast path
+    if (at_defaults() && !is.null(DEFAULT_TIERS[[sp]])) {
+      return(list(tier = DEFAULT_TIERS[[sp]]))
+    }
+    
+    # Otherwise recompute with current thresholds — slow path
     dl <- dom_layers()
     dm <- dl$dom; data_mask <- dl$data_mask
     
-    dom_t1  <- as.numeric(input$dom_t1) / 100
-    dom_t2  <- as.numeric(input$dom_t2) / 100
-    itn_k1  <- input$itn_t1 / 100
-    itn_k2  <- input$itn_t2 / 100
+    dom_t1  <- input$dom_t1  / 100
+    dom_t2  <- input$dom_t2  / 100
+    itn_k1  <- input$itn_t1  / 100
+    itn_k2  <- input$itn_t2  / 100
     pfpr_k1 <- input$pfpr_t1 / 100
     pfpr_k2 <- input$pfpr_t2 / 100
     
-    # T1: dom >= dom_t1 | T2: dom_t2 to dom_t1 | T3: < dom_t2
-    # Dynamic T2: if T1 drops to <= dom_t2 (0.40), shift T2 down to 0.25
     dom_t2_eff <- if (dom_t1 <= dom_t2) 0.25 else dom_t2
-    valid <- !is.na(data_mask)
+    valid   <- !is.na(data_mask)
     dm_v    <- values(dm); valid_v <- values(data_mask)
-    tv_t    <- rep(NA_real_, length(dm_v))
+    
+    tv_t <- rep(NA_real_, length(dm_v))
     tv_t[!is.na(valid_v) & !is.na(dm_v) & dm_v >= dom_t1] <- 1
     tv_t[!is.na(valid_v) & !is.na(dm_v) & dm_v >= dom_t2_eff & dm_v < dom_t1] <- 2
     tv_t[!is.na(valid_v) & !is.na(dm_v) & dm_v <  dom_t2_eff] <- 3
     tv <- rast(TEMPLATE); values(tv) <- tv_t
     
-    # T1: < itn_k1 | T2: itn_k1 to itn_k2 | T3: >= itn_k2
     ti <- rast(TEMPLATE); values(ti) <- NA
     ti[!is.na(data_mask) & ITN_ALIGNED <  itn_k1] <- 1
     ti[!is.na(data_mask) & ITN_ALIGNED >= itn_k1 & ITN_ALIGNED < itn_k2] <- 2
     ti[!is.na(data_mask) & ITN_ALIGNED >= itn_k2] <- 3
     
-    # T1: < pfpr_k1 | T2: pfpr_k1 to pfpr_k2 | T3: >= pfpr_k2
     tp <- rast(TEMPLATE); values(tp) <- NA
     tp[!is.na(data_mask) & PFPR_ALIGNED <  pfpr_k1] <- 1
     tp[!is.na(data_mask) & PFPR_ALIGNED >= pfpr_k1 & PFPR_ALIGNED < pfpr_k2] <- 2
     tp[!is.na(data_mask) & PFPR_ALIGNED >= pfpr_k2] <- 3
     
-    # Each criterion scores 1 (best) to 3 (worst)
-    # Total score range: 3 (all T1) to 9 (all T3)
-    # Score 3-4 → Tier 1 | Score 5-7 → Tier 2 | Score 8-9 → Tier 3
-    score <- tv + ti + tp   # sum of dominance + ITN + PfPR tier scores
-    
+    score <- tv + ti + tp
     out <- rast(TEMPLATE); values(out) <- NA
     out[valid & score >= 3 & score <= 4] <- 1
     out[valid & score >= 5 & score <= 7] <- 2
@@ -432,7 +506,7 @@ server <- function(input, output, session) {
            cex    = 0.85, xpd = TRUE, title.font = 2)
   }
   
-  output$map_uc1a <- renderPlot({ res <- tier_weighted(); plot_tier(res$tier, "") })
+  output$map_uc1a <- renderPlot({ res <- tier_weighted(); tr <- if (is.list(res)) res$tier else res; plot_tier(tr, "") })
   
   output$cov_table <- renderTable({
     res  <- tier_weighted(); tr <- res$tier
@@ -469,7 +543,7 @@ server <- function(input, output, session) {
   })
   
   output$burden_table <- renderTable({
-    res <- tier_weighted(); tr <- res$tier
+    res <- tier_weighted(); tr <- if (is.list(res)) res$tier else res
     bur_valid <- mask(BURDEN_GLOBAL,
                       ifel(!is.na(INC_ALIGNED) & !is.na(POP_ALIGNED) &
                              POP_ALIGNED>0 & INC_ALIGNED>1e-12, 1, NA))
@@ -613,8 +687,7 @@ server <- function(input, output, session) {
     
     # Y axis ticks: show as % change
     log_breaks <- c(10, 25, 50, 75, 100, 150, 200, 300, 500, 1000, 3300)
-    log_labels <- c("-90%", "-75%", "-50%", "-25%", "0%",
-                    "+50%", "+100%", "+200%", "+400%", "+900%", "+3200%")
+    log_labels <- c("-90%","-75%","-50%","-25%","0%","+50%","+100%","+200%","+400%","+900%","+3200%")
     
     fig <- plotly::plot_ly()
     for (sp in unique(df_plot$species)) {
@@ -637,10 +710,12 @@ server <- function(input, output, session) {
     fig <- plotly::layout(fig,
                           xaxis = list(title = x_label),
                           yaxis = list(
-                            title = "% change in Tier 1 eligible area from baseline",
-                            type  = "log",
+                            title    = "% change in Tier 1 eligible area from baseline",
+                            type     = "log",
                             tickvals = log_breaks,
-                            ticktext = log_labels
+                            ticktext = log_labels,
+                            range    = c(log10(max(10, min(df_plot$y_log, na.rm=TRUE) * 0.7)),
+                                         log10(max(df_plot$y_log, na.rm=TRUE) * 1.3))
                           ),
                           shapes = list(
                             list(type = "line", x0 = baseline_th, x1 = baseline_th,
