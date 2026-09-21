@@ -5,17 +5,8 @@ library(shiny)
 library(terra)
 library(sf)
 
+# Data folder must be in the same directory as this script
 data_dir <- "data"
-
-paths <- list(
-  ste  = file.path(data_dir, "An_stephensi.tif"),
-  pfpr = file.path(data_dir, "PfPR_mean.tif"),
-  itn  = file.path(data_dir, "ITN_use_rate.tif"),
-  inc  = file.path(data_dir, "Pf_Incidence_mean_2000.tif"),
-  pop  = file.path(data_dir, "POP_MEAN_2000_2020_5km.tif"),
-  ghs  = file.path(data_dir, "GHS_SMOD_2025.tif"),
-  gadm = file.path(data_dir, "gadm_ssa.gpkg")
-)
 
 to01 <- function(r) {
   mx <- suppressWarnings(as.numeric(global(r, "max", na.rm = TRUE)))
@@ -28,66 +19,37 @@ fast_align <- function(r, template, method = "bilinear") {
   else resample(r, template, method = method)
 }
 
-cat("Loading data...\n")
+cat("Loading pre-processed data...\n")
 
-ssa_iso <- c(
-  "AGO","BEN","BWA","BFA","BDI","CPV","CMR","CAF","TCD","COM","COG","CIV","COD","GNQ","ERI",
-  "SWZ","ETH","GAB","GMB","GHA","GIN","GNB","KEN","LSO","LBR","MDG","MWI","MLI","MRT","MUS","MOZ",
-  "NAM","NER","NGA","RWA","STP","SEN","SYC","SLE","ZAF","SSD","TGO","UGA","TZA","ZMB","ZWE",
-  "SDN","SOM","DJI"
-)
-africa_iso <- unique(c(ssa_iso, "MAR","TUN","LBY","EGY","DZA","SDN","SOM","DJI"))
+# Load lightweight pre-processed files
+bounds          <- readRDS(file.path(data_dir, "boundaries.rds"))
+ADMIN0_A        <- vect(bounds$ADMIN0_sf)
+ADMIN1_A        <- vect(bounds$ADMIN1_sf)
+AFRICA0_A       <- vect(bounds$AFRICA0_sf)
+AFRICA1_A       <- vect(bounds$AFRICA1_sf)
+COUNTRY_CHOICES <- bounds$COUNTRY_CHOICES
+afro_sf         <- bounds$afro_sf
 
-a0       <- st_read(paths$gadm, layer = "ADM_0", quiet = TRUE)
-a1       <- st_read(paths$gadm, layer = "ADM_1", quiet = TRUE)
-ADMIN0   <- vect(a0[a0$GID_0 %in% ssa_iso,  ])
+PFPR_ALIGNED  <- rast(file.path(data_dir, "pfpr_aligned.tif"))
+POP_ALIGNED   <- rast(file.path(data_dir, "pop_aligned.tif"))
+CELL_AREA_KM2 <- rast(file.path(data_dir, "cell_area_km2.tif"))
+TEMPLATE      <- PFPR_ALIGNED
 
-# Named vector: country name -> ISO code for zoom dropdown
-afro_sf       <- a0[a0$GID_0 %in% ssa_iso, ]
-name_col      <- if ("COUNTRY" %in% names(afro_sf)) "COUNTRY" else "NAME_0"
-COUNTRY_CHOICES <- c("None (full Africa)" = "",
-                     setNames(sort(afro_sf$GID_0),
-                              afro_sf[[name_col]][order(afro_sf$GID_0)]))
-ADMIN1   <- vect(a1[a1$GID_0 %in% ssa_iso,  ])
-AFRICA0  <- vect(a0[a0$GID_0 %in% africa_iso, ])
-AFRICA1  <- vect(a1[a1$GID_0 %in% africa_iso, ])
+# UC4 specific — stephensi and GHS
+STE_ALIGNED   <- rast(file.path(data_dir, "stephensi_aligned.tif"))
+GHS_ALIGNED   <- rast(file.path(data_dir, "ghs_aligned.tif"))
 
-PFPR_MEAN <- rast(paths$pfpr)
-ADMIN0_P  <- if (!identical(crs(ADMIN0), crs(PFPR_MEAN))) project(ADMIN0, crs(PFPR_MEAN)) else ADMIN0
-TEMPLATE  <- crop(PFPR_MEAN, ADMIN0_P, snap = "out")
-ADMIN0_A  <- if (!identical(crs(ADMIN0), crs(TEMPLATE))) project(ADMIN0, crs(TEMPLATE)) else ADMIN0
-ADMIN1_A  <- if (!identical(crs(ADMIN1), crs(TEMPLATE))) project(ADMIN1, crs(TEMPLATE)) else ADMIN1
-AFRICA0_A <- if (!identical(crs(AFRICA0), crs(TEMPLATE))) project(AFRICA0, crs(TEMPLATE)) else AFRICA0
-AFRICA1_A <- if (!identical(crs(AFRICA1), crs(TEMPLATE))) project(AFRICA1, crs(TEMPLATE)) else AFRICA1
+ghs_min    <- 21
+ste_floor  <- 0.10
 
-PFPR_ALIGNED <- to01(fast_align(PFPR_MEAN, TEMPLATE))
-ITN_ALIGNED  <- to01(fast_align(rast(paths$itn), TEMPLATE))
-INC_ALIGNED  <- fast_align(rast(paths$inc), TEMPLATE)
-POP_ALIGNED  <- fast_align(rast(paths$pop), TEMPLATE)
-BURDEN_GLOBAL <- POP_ALIGNED * INC_ALIGNED
-CELL_AREA_KM2 <- cellSize(TEMPLATE, unit = "km")
-
-# Stephensi
-STE_RAW     <- to01(fast_align(rast(paths$ste), TEMPLATE))
-STE_ALIGNED <- mask(STE_RAW, ADMIN0_A)
-
-# GHS-SMOD — aligned to template
-GHS_RAW     <- rast(paths$ghs)
-GHS_ALIGNED <- fast_align(GHS_RAW, TEMPLATE, method = "mode")
-GHS_ALIGNED <- mask(GHS_ALIGNED, ADMIN0_A)
-
-# Stephensi urban presence denominator
-# Total An. stephensi predicted area (presence >= ste_floor, regardless of GHS)
-# Used as denominator for % of stephensi range that is eligible
-STE_TOTAL_MASK <- ifel(!is.na(STE_ALIGNED) & STE_ALIGNED >= 0.10, 1, NA)
-STE_TOTAL_MASK <- mask(STE_TOTAL_MASK, ADMIN0_A)
-STE_URBAN_AREA <- as.numeric(global(mask(CELL_AREA_KM2, STE_TOTAL_MASK),
-                                    "sum", na.rm = TRUE)[1,1])
+# Stephensi urban area for coverage metrics
+ste_urban  <- ifel(!is.na(GHS_ALIGNED) & GHS_ALIGNED >= ghs_min &
+                     !is.na(STE_ALIGNED) & STE_ALIGNED >= ste_floor, 1, NA)
+ste_urban  <- mask(ste_urban, ADMIN0_A)
+STE_URBAN_AREA <- as.numeric(global(mask(CELL_AREA_KM2, ste_urban),
+                                    "sum", na.rm=TRUE)[1,1])
 
 cat("Data loaded.\n")
-
-ste_floor  <- 0.10   # minimum stephensi presence
-ghs_min    <- 21     # urban/peri-urban minimum (suburban)
 
 # Stephensi occurrence tiers (ceiling) — fixed
 ste_t1 <- 0.70;  ste_t2 <- 0.40
