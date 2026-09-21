@@ -5,6 +5,6 @@ account: preethilaks
 server: shinyapps.io
 hostUrl: https://api.shinyapps.io/v1
 appId: 17959046
-bundleId: 12583616
+bundleId: 12584021
 url: https://preethilaks.shinyapps.io/wolbachia-demo-1a/
 version: 1

@@ -284,14 +284,9 @@ server <- function(input, output, session) {
   
   # Lazy-load species rasters and compute dominance only when needed
   dom_layers <- reactive({
-    sp      <- input$species
-    base_p  <- fast_align(to01(rast(species_rasters[[sp]])), TEMPLATE)
-    base_p0 <- base_p; base_p0[is.na(base_p0)] <- 0
-    others  <- rast(lapply(setdiff(names(species_rasters), sp), function(nm) {
-      r <- fast_align(to01(rast(species_rasters[[nm]])), TEMPLATE)
-      r[is.na(r)] <- 0; r
-    }))
-    dom       <- safe_div(base_p0, base_p0 + app(others, sum))
+    sp        <- input$species
+    base_p    <- rast(file.path(data_dir, paste0(sp, "_aligned.tif")))
+    dom       <- rast(file.path(data_dir, paste0("dom_", sp, ".tif")))
     data_mask <- ifel(!is.na(PFPR_ALIGNED) & !is.na(ITN_ALIGNED) &
                         !is.na(base_p) & base_p >= 0.10, 1, NA)
     list(dom = dom, data_mask = data_mask)
@@ -509,11 +504,10 @@ server <- function(input, output, session) {
       done  <- 0
       for (s in seq_along(sp_names)) {
         sp      <- sp_names[s]
-        base_sp <- SPECIES_ALIGNED[[sp]]
+        base_sp <- rast(file.path(data_dir, paste0(sp, "_aligned.tif")))
         base_p0 <- base_sp; base_p0[is.na(base_p0)] <- 0
-        others  <- rast(lapply(setdiff(names(SPECIES_ALIGNED), sp),
-                               function(nm) { r <- SPECIES_ALIGNED[[nm]]; r[is.na(r)] <- 0; r }))
-        dom_sp   <- safe_div(base_p0, base_p0 + app(others, sum))
+        dom_sp  <- rast(file.path(data_dir, paste0("dom_", sp, ".tif")))
+        # dom_sp already loaded above
         dm_sp    <- values(dom_sp)
         valid_sp <- values(ifel(!is.na(PFPR_ALIGNED) & !is.na(ITN_ALIGNED) &
                                   !is.na(base_sp) & base_sp >= pres_floor, 1, NA))
