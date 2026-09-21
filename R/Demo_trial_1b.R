@@ -263,16 +263,12 @@ server <- function(input, output, session) {
   output$pfpr_tier3_label <- renderText({ paste0("<", input$pfpr_t2, "%") })
   
   dom_layers <- reactive({
-    sp      <- input$species
-    base_p  <- fast_align(to01(rast(species_rasters[[sp]])), TEMPLATE)
-    base_p0 <- base_p; base_p0[is.na(base_p0)] <- 0
-    others  <- rast(lapply(setdiff(sp_names, sp),
-                           function(nm) { r <- fast_align(to01(rast(sp_path[[nm]])), TEMPLATE); r[is.na(r)] <- 0; r }))
-    dom     <- safe_div(base_p, base_p + app(others, sum))
-    sp_raw  <- fast_align(to01(rast(sp_path[[sp]])), TEMPLATE)
+    sp        <- input$species
+    base_p    <- rast(file.path(data_dir, paste0(sp, "_aligned.tif")))
+    dom       <- rast(file.path(data_dir, paste0("dom_", sp, ".tif")))
     data_mask <- ifel(!is.na(PFPR_ALIGNED) & !is.na(ITN_ALIGNED) &
-                        !is.na(sp_raw) & sp_raw >= 0.10, 1, NA)
-    list(dom = dom, sp_raw = sp_raw, data_mask = data_mask)
+                        !is.na(base_p) & base_p >= 0.10, 1, NA)
+    list(dom = dom, data_mask = data_mask)
   }) |> bindCache(input$species)
   
   tier_weighted <- reactive({
@@ -491,11 +487,10 @@ server <- function(input, output, session) {
       done  <- 0
       for (s in seq_along(sp_names)) {
         sp      <- sp_names[s]
-        base_sp <- fast_align(to01(rast(sp_path[[sp]])), TEMPLATE)
+        base_sp <- rast(file.path(data_dir, paste0(sp, "_aligned.tif")))
         base_p0 <- base_sp; base_p0[is.na(base_p0)] <- 0
-        others  <- rast(lapply(setdiff(sp_names, sp),
-                               function(nm) { r <- fast_align(to01(rast(sp_path[[nm]])), TEMPLATE); r[is.na(r)] <- 0; r }))
-        dom_sp   <- safe_div(base_p0, base_p0 + app(others, sum))
+        dom_sp  <- rast(file.path(data_dir, paste0("dom_", sp, ".tif")))
+        # dom_sp already loaded above
         dm_sp    <- values(dom_sp)
         valid_sp <- values(ifel(!is.na(PFPR_ALIGNED) & !is.na(ITN_ALIGNED) &
                                   !is.na(base_sp) & base_sp >= pres_floor, 1, NA))
