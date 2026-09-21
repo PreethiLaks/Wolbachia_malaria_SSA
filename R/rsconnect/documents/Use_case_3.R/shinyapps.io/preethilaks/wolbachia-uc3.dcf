@@ -1,10 +1,10 @@
-name: wolbachia-demo-1a
+name: wolbachia-uc3
 title:
 username: preethilaks
 account: preethilaks
 server: shinyapps.io
 hostUrl: https://api.shinyapps.io/v1
-appId: 17959046
-bundleId: 12584790
-url: https://preethilaks.shinyapps.io/wolbachia-demo-1a/
+appId: 17965397
+bundleId: 12584849
+url: https://preethilaks.shinyapps.io/wolbachia-uc3/
 version: 1
