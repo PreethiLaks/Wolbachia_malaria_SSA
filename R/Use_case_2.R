@@ -7,91 +7,54 @@ library(terra)
 library(sf)
 library(plotly)
 
+# Data folder must be in the same directory as this script
 data_dir <- "data"
 
-paths <- list(
-  ara  = file.path(data_dir, "An_arabiensis.tif"),
-  col  = file.path(data_dir, "An_coluzzii.tif"),
-  mou  = file.path(data_dir, "An_moucheti.tif"),
-  gam  = file.path(data_dir, "An_gambiae.tif"),
-  ste  = file.path(data_dir, "An_stephensi.tif"),
-  pfpr = file.path(data_dir, "PfPR_mean.tif"),
-  itn  = file.path(data_dir, "ITN_use_rate.tif"),
-  inc  = file.path(data_dir, "Pf_Incidence_mean_2000.tif"),
-  pop  = file.path(data_dir, "POP_MEAN_2000_2020_5km.tif"),
-  gadm = file.path(data_dir, "gadm_ssa.gpkg")
-)
-
-# Helper functions
+# ── Helper functions ──────────────────────────────────────────
+safe_div <- function(num, den, eps = 1e-9) num / (den + eps)
+fast_align <- function(r, template, method = "bilinear") {
+  if (!identical(crs(r), crs(template))) project(r, template, method = method)
+  else resample(r, template, method = method)
+}
 to01 <- function(r) {
   mx <- suppressWarnings(as.numeric(global(r, "max", na.rm = TRUE)))
   r1 <- if (is.finite(mx) && mx > 1) r / 100 else r
   clamp(r1, 0, 1, values = TRUE)
 }
 
-safe_div <- function(num, den, eps = 1e-9) num / (den + eps)
+cat("Loading pre-processed data...\n")
 
-fast_align <- function(r, template, method = "bilinear") {
-  if (!identical(crs(r), crs(template))) project(r, template, method = method)
-  else resample(r, template, method = method)
-}
+# ── Load lightweight pre-processed files ─────────────────────
+bounds          <- readRDS(file.path(data_dir, "boundaries.rds"))
+ADMIN0_A        <- vect(bounds$ADMIN0_sf)
+ADMIN1_A        <- vect(bounds$ADMIN1_sf)
+AFRICA0_A       <- vect(bounds$AFRICA0_sf)
+AFRICA1_A       <- vect(bounds$AFRICA1_sf)
+COUNTRY_CHOICES <- bounds$COUNTRY_CHOICES
+afro_sf         <- bounds$afro_sf
 
-cat("Loading data...\n")
+PFPR_ALIGNED  <- rast(file.path(data_dir, "pfpr_aligned.tif"))
+ITN_ALIGNED   <- rast(file.path(data_dir, "itn_aligned.tif"))
+BURDEN_GLOBAL <- rast(file.path(data_dir, "burden_aligned.tif"))
+CELL_AREA_KM2 <- rast(file.path(data_dir, "cell_area_km2.tif"))
+TEMPLATE      <- PFPR_ALIGNED
 
-# SSA country list for analysis boundary
-ssa_iso <- c(
-  "AGO","BEN","BWA","BFA","BDI","CPV","CMR","CAF","TCD","COM","COG","CIV","COD","GNQ","ERI",
-  "SWZ","ETH","GAB","GMB","GHA","GIN","GNB","KEN","LSO","LBR","MDG","MWI","MLI","MRT","MUS","MOZ",
-  "NAM","NER","NGA","RWA","STP","SEN","SYC","SLE","ZAF","SSD","TGO","UGA","TZA","ZMB","ZWE",
-  "SDN","SOM","DJI"
+AFRO_BUR <- readRDS(file.path(data_dir, "afro_burden.rds"))
+
+sp_names <- c("arabiensis","coluzzii","moucheti","gambiae")
+
+DEFAULT_TIERS <- lapply(setNames(sp_names, sp_names), function(sp) {
+  rast(file.path(data_dir, paste0("tier_uc2_", sp, ".tif")))
+})
+
+sp_path <- list(
+  arabiensis = file.path(data_dir, "arabiensis_aligned.tif"),
+  coluzzii   = file.path(data_dir, "coluzzii_aligned.tif"),
+  moucheti   = file.path(data_dir, "moucheti_aligned.tif"),
+  gambiae    = file.path(data_dir, "gambiae_aligned.tif"),
+  stephensi  = file.path(data_dir, "stephensi_aligned.tif")
 )
-
-# Full Africa for map display context
-africa_iso <- unique(c(ssa_iso, "MAR","TUN","LBY","EGY","DZA"))
-
-a0       <- st_read(paths$gadm, layer = "ADM_0", quiet = TRUE)
-a1       <- st_read(paths$gadm, layer = "ADM_1", quiet = TRUE)
-
-# Analysis boundary — sub-Saharan Africa only
-ADMIN0   <- vect(a0[a0$GID_0 %in% ssa_iso, ])
-ADMIN1   <- vect(a1[a1$GID_0 %in% ssa_iso, ])
-
-# Named vector: country name -> ISO code for zoom dropdown
-afro_sf       <- a0[a0$GID_0 %in% ssa_iso, ]
-# GADM uses COUNTRY or NAME_0 column for country names
-name_col      <- if ("COUNTRY" %in% names(afro_sf)) "COUNTRY" else "NAME_0"
-COUNTRY_CHOICES <- c("None (full Africa)" = "",
-                     setNames(sort(afro_sf$GID_0),
-                              afro_sf[[name_col]][order(afro_sf$GID_0)]))
-
-# Display boundary — all Africa (for map background context)
-AFRICA0  <- vect(a0[a0$GID_0 %in% africa_iso, ])
-AFRICA1  <- vect(a1[a1$GID_0 %in% africa_iso, ])
-
-PFPR_MEAN <- rast(paths$pfpr)
-ADMIN0_P  <- if (!identical(crs(ADMIN0), crs(PFPR_MEAN))) project(ADMIN0, crs(PFPR_MEAN)) else ADMIN0
-TEMPLATE  <- crop(PFPR_MEAN, ADMIN0_P, snap = "out")
-ADMIN0_A  <- if (!identical(crs(ADMIN0), crs(TEMPLATE))) project(ADMIN0, crs(TEMPLATE)) else ADMIN0
-ADMIN1_A  <- if (!identical(crs(ADMIN1), crs(TEMPLATE))) project(ADMIN1, crs(TEMPLATE)) else ADMIN1
-AFRICA0_A <- if (!identical(crs(AFRICA0), crs(TEMPLATE))) project(AFRICA0, crs(TEMPLATE)) else AFRICA0
-AFRICA1_A <- if (!identical(crs(AFRICA1), crs(TEMPLATE))) project(AFRICA1, crs(TEMPLATE)) else AFRICA1
-
-PFPR_ALIGNED <- to01(fast_align(PFPR_MEAN, TEMPLATE))
-ITN_ALIGNED  <- to01(fast_align(rast(paths$itn), TEMPLATE))
-INC_ALIGNED  <- fast_align(rast(paths$inc), TEMPLATE)
-POP_ALIGNED  <- fast_align(rast(paths$pop), TEMPLATE)
-
-BURDEN_GLOBAL <- POP_ALIGNED * INC_ALIGNED
-CELL_AREA_KM2 <- cellSize(TEMPLATE, unit = "km")
-
-species_rasters <- list(
-  arabiensis = rast(paths$ara),
-  coluzzii   = rast(paths$col),
-  moucheti   = rast(paths$mou),
-  gambiae    = rast(paths$gam),
-  stephensi  = rast(paths$ste)
-)
-SPECIES_ALIGNED <- lapply(species_rasters, function(r) fast_align(to01(r), TEMPLATE))
+species_rasters <- sp_path
 
 cat("Data loaded.\n")
 
@@ -310,17 +273,28 @@ server <- function(input, output, session) {
   
   dom_layers <- reactive({
     sp      <- input$species
-    base_p  <- SPECIES_ALIGNED[[sp]]; base_p[is.na(base_p)] <- 0
-    others  <- rast(lapply(setdiff(names(SPECIES_ALIGNED), sp),
-                           function(nm) { r <- SPECIES_ALIGNED[[nm]]; r[is.na(r)] <- 0; r }))
+    base_p  <- fast_align(to01(rast(species_rasters[[sp]])), TEMPLATE)
+    base_p0 <- base_p; base_p0[is.na(base_p0)] <- 0
+    others  <- rast(lapply(setdiff(sp_names, sp),
+                           function(nm) { r <- fast_align(to01(rast(sp_path[[nm]])), TEMPLATE); r[is.na(r)] <- 0; r }))
     dom     <- safe_div(base_p, base_p + app(others, sum))
-    sp_raw  <- SPECIES_ALIGNED[[sp]]
+    sp_raw  <- fast_align(to01(rast(sp_path[[sp]])), TEMPLATE)
     data_mask <- ifel(!is.na(PFPR_ALIGNED) & !is.na(ITN_ALIGNED) &
                         !is.na(sp_raw) & sp_raw >= 0.10, 1, NA)
     list(dom = dom, sp_raw = sp_raw, data_mask = data_mask)
   }) |> bindCache(input$species)
   
   tier_weighted <- reactive({
+    sp <- input$species
+    
+    # Use pre-computed raster if at defaults
+    if (input$dom_t1 == 50 & input$dom_t2 == 25 &
+        input$itn_t1 == 80 & input$itn_t2 == 60 &
+        input$pfpr_t1 == 40 & input$pfpr_t2 == 15 &
+        !is.null(DEFAULT_TIERS[[sp]])) {
+      return(list(tier = DEFAULT_TIERS[[sp]]))
+    }
+    
     dl <- dom_layers()
     dm <- dl$dom; data_mask <- dl$data_mask
     
@@ -433,10 +407,10 @@ server <- function(input, output, session) {
            cex    = 0.85, xpd = TRUE, title.font = 2)
   }
   
-  output$map_uc2 <- renderPlot({ res <- tier_weighted(); plot_tier(res$tier, "") })
+  output$map_uc2 <- renderPlot({ res <- tier_weighted(); tr <- if (is.list(res)) res$tier else res; plot_tier(tr, "") })
   
   output$cov_table <- renderTable({
-    res  <- tier_weighted(); tr <- res$tier
+    res  <- tier_weighted(); tr <- if (is.list(res)) res$tier else res
     n_afro <- nrow(ADMIN0_A)   # total sub-Saharan Africa countries = denominator
     
     area <- function(m) {
@@ -470,7 +444,7 @@ server <- function(input, output, session) {
   })
   
   output$burden_table <- renderTable({
-    res <- tier_weighted(); tr <- res$tier
+    res <- tier_weighted(); tr <- if (is.list(res)) res$tier else res
     bur_valid <- mask(BURDEN_GLOBAL,
                       ifel(!is.na(INC_ALIGNED) & !is.na(POP_ALIGNED) &
                              POP_ALIGNED>0 & INC_ALIGNED>1e-12, 1, NA))
@@ -534,10 +508,10 @@ server <- function(input, output, session) {
       done  <- 0
       for (s in seq_along(sp_names)) {
         sp      <- sp_names[s]
-        base_sp <- SPECIES_ALIGNED[[sp]]
+        base_sp <- fast_align(to01(rast(sp_path[[sp]])), TEMPLATE)
         base_p0 <- base_sp; base_p0[is.na(base_p0)] <- 0
-        others  <- rast(lapply(setdiff(names(SPECIES_ALIGNED), sp),
-                               function(nm) { r <- SPECIES_ALIGNED[[nm]]; r[is.na(r)] <- 0; r }))
+        others  <- rast(lapply(setdiff(sp_names, sp),
+                               function(nm) { r <- fast_align(to01(rast(sp_path[[nm]])), TEMPLATE); r[is.na(r)] <- 0; r }))
         dom_sp   <- safe_div(base_p0, base_p0 + app(others, sum))
         dm_sp    <- values(dom_sp)
         valid_sp <- values(ifel(!is.na(PFPR_ALIGNED) & !is.na(ITN_ALIGNED) &
