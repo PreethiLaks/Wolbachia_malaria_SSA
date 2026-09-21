@@ -266,10 +266,10 @@ server <- function(input, output, session) {
     sp      <- input$species
     base_p  <- fast_align(to01(rast(species_rasters[[sp]])), TEMPLATE)
     base_p0 <- base_p; base_p0[is.na(base_p0)] <- 0
-    others  <- rast(lapply(setdiff(names(SPECIES_ALIGNED), sp),
-                           function(nm) { r <- SPECIES_ALIGNED[[nm]]; r[is.na(r)] <- 0; r }))
+    others  <- rast(lapply(setdiff(sp_names, sp),
+                           function(nm) { r <- fast_align(to01(rast(sp_path[[nm]])), TEMPLATE); r[is.na(r)] <- 0; r }))
     dom     <- safe_div(base_p, base_p + app(others, sum))
-    sp_raw  <- SPECIES_ALIGNED[[sp]]
+    sp_raw  <- fast_align(to01(rast(sp_path[[sp]])), TEMPLATE)
     data_mask <- ifel(!is.na(PFPR_ALIGNED) & !is.na(ITN_ALIGNED) &
                         !is.na(sp_raw) & sp_raw >= 0.10, 1, NA)
     list(dom = dom, sp_raw = sp_raw, data_mask = data_mask)
@@ -491,10 +491,10 @@ server <- function(input, output, session) {
       done  <- 0
       for (s in seq_along(sp_names)) {
         sp      <- sp_names[s]
-        base_sp <- SPECIES_ALIGNED[[sp]]
+        base_sp <- fast_align(to01(rast(sp_path[[sp]])), TEMPLATE)
         base_p0 <- base_sp; base_p0[is.na(base_p0)] <- 0
-        others  <- rast(lapply(setdiff(names(SPECIES_ALIGNED), sp),
-                               function(nm) { r <- SPECIES_ALIGNED[[nm]]; r[is.na(r)] <- 0; r }))
+        others  <- rast(lapply(setdiff(sp_names, sp),
+                               function(nm) { r <- fast_align(to01(rast(sp_path[[nm]])), TEMPLATE); r[is.na(r)] <- 0; r }))
         dom_sp   <- safe_div(base_p0, base_p0 + app(others, sum))
         dm_sp    <- values(dom_sp)
         valid_sp <- values(ifel(!is.na(PFPR_ALIGNED) & !is.na(ITN_ALIGNED) &
