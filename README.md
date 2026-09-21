@@ -66,8 +66,8 @@ R version 4.3 or later. Install required packages:
 setwd("path/to/Wolbachia_malaria_SSA")
 
 ## Interactive Shiny applications
-| App | Description | Link |
-|---|---|---|
+| App | Description |
+|---|---|
 | Demo_trial_1a.R | [Demonstration trial 1a — Entomological feasibility](https://preethilaks.shinyapps.io/wolbachia-demo-1a/) | 
 | Demo_trial_1b.R | [Demonstration trial 1b — Epidemiological evaluation](https://preethilaks.shinyapps.io/wolbachia-demo-1b/) |
 | Use_case_2.R | [Use case 2 — Routine implementation](https://preethilaks.shinyapps.io/wolbachia-uc3/) |
