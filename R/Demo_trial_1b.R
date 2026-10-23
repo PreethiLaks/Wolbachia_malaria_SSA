@@ -13,7 +13,7 @@ data_dir <- "data"
 # ── Helper functions ──────────────────────────────────────────
 safe_div <- function(num, den, eps = 1e-9) num / (den + eps)
 fast_align <- function(r, template, method = "bilinear") {
-  if (!identical(crs(r), crs(template))) project(r, template, method = method)
+  if (!same.crs(r, template)) project(r, template, method = method)
   else resample(r, template, method = method)
 }
 to01 <- function(r) {
@@ -35,10 +35,16 @@ afro_sf         <- bounds$afro_sf
 
 PFPR_ALIGNED  <- rast(file.path(data_dir, "pfpr_aligned.tif"))
 ITN_ALIGNED   <- rast(file.path(data_dir, "itn_aligned.tif"))
+INC_ALIGNED   <- rast(file.path(data_dir, "inc_aligned.tif"))
 BURDEN_GLOBAL <- rast(file.path(data_dir, "burden_aligned.tif"))
 CELL_AREA_KM2 <- rast(file.path(data_dir, "cell_area_km2.tif"))
 TEMPLATE      <- PFPR_ALIGNED
 
+# Ensure all boundary vectors share the raster CRS
+if (!same.crs(ADMIN0_A,  TEMPLATE)) ADMIN0_A  <- project(ADMIN0_A,  crs(TEMPLATE))
+if (!same.crs(ADMIN1_A,  TEMPLATE)) ADMIN1_A  <- project(ADMIN1_A,  crs(TEMPLATE))
+if (!same.crs(AFRICA0_A, TEMPLATE)) AFRICA0_A <- project(AFRICA0_A, crs(TEMPLATE))
+if (!same.crs(AFRICA1_A, TEMPLATE)) AFRICA1_A <- project(AFRICA1_A, crs(TEMPLATE))
 
 sp_names <- c("arabiensis","coluzzii","moucheti","gambiae")
 
@@ -181,7 +187,8 @@ ui <- fluidPage(
                  div(class = "tier-legend",
                      div(class = "tier-chip", style = "background:#1a9641;", "Tier 1"),
                      div(class = "tier-chip", style = "background:#f4d03f; color:#333;", "Tier 2"),
-                     div(class = "tier-chip", style = "background:#d7191c;", "Tier 3")
+                     div(class = "tier-chip", style = "background:#d7191c;", "Tier 3"),
+                     div(class = "tier-chip", style = "background:#b0c4d8; color:#333;", "Malaria present, not eligible")
                  )
     ),
     
@@ -262,10 +269,15 @@ server <- function(input, output, session) {
   output$pfpr_tier2_label <- renderText({ paste0(input$pfpr_t2, "\u2013", input$pfpr_t1, "%") })
   output$pfpr_tier3_label <- renderText({ paste0("<", input$pfpr_t2, "%") })
   
+  # Dominance denominator uses ALL 5 species (sp_path has stephensi) — critical for East Africa
   dom_layers <- reactive({
     sp        <- input$species
-    base_p    <- rast(file.path(data_dir, paste0(sp, "_aligned.tif")))
-    dom       <- rast(file.path(data_dir, paste0("dom_", sp, ".tif")))
+    base_p    <- rast(sp_path[[sp]])
+    base_p0   <- base_p; base_p0[is.na(base_p0)] <- 0
+    others    <- rast(lapply(setdiff(names(sp_path), sp), function(nm) {
+      r <- rast(sp_path[[nm]]); r[is.na(r)] <- 0; r
+    }))
+    dom       <- base_p0 / (base_p0 + app(others, sum) + 1e-9)
     data_mask <- ifel(!is.na(PFPR_ALIGNED) & !is.na(ITN_ALIGNED) &
                         !is.na(base_p) & base_p >= 0.10, 1, NA)
     list(dom = dom, data_mask = data_mask)
@@ -334,7 +346,7 @@ server <- function(input, output, session) {
     zoom_iso <- input$zoom_country
     if (nchar(zoom_iso) > 0) {
       ctry_v <- vect(afro_sf[afro_sf$GID_0 == zoom_iso, ])
-      ctry_v <- if (!identical(crs(ctry_v), crs(TEMPLATE))) project(ctry_v, crs(TEMPLATE)) else ctry_v
+      ctry_v <- if (!same.crs(ctry_v, TEMPLATE)) project(ctry_v, crs(TEMPLATE)) else ctry_v
       ce    <- ext(ctry_v)
       dx    <- diff(c(xmin(ce), xmax(ce))); dy <- diff(c(ymin(ce), ymax(ce)))
       pad   <- max(dx, dy) * 0.25
@@ -358,10 +370,22 @@ server <- function(input, output, session) {
     v1_view   <- crop(ADMIN1_A, e_view)
     tier_view <- crop(tier_r, e_view)
     
+    # 4th colour: malaria present (PfPR > 0) but not in any tier
+    malaria_bg      <- ifel(!is.na(PFPR_ALIGNED) & PFPR_ALIGNED > 0 &
+                              is.na(tier_r), 0, NA)
+    malaria_bg      <- mask(malaria_bg, ADMIN0_A)
+    malaria_bg_view <- crop(malaria_bg, e_view)
+    
     par(mar = c(1,1,2.5,1))
     plot(af0_view, col="#e4e4e4", border=NA, axes=FALSE, xlim=xlim, ylim=ylim,
          main=title_txt, cex.main=1.0)
     plot(v0_view, add=TRUE, col="#f0f0f0", border=NA)
+    
+    # Draw malaria-present background first (behind tier colours)
+    plot(malaria_bg_view, add=TRUE,
+         col    = "#b0c4d8",
+         breaks = c(-0.5, 0.5),
+         legend = FALSE, axes = FALSE)
     
     if (length(vals) > 0) {
       # Use fixed 3-colour palette with full breaks so colours always match tiers
@@ -376,8 +400,8 @@ server <- function(input, output, session) {
     plot(af0_view, add=TRUE, lwd=0.4, col=NA, border="#aaaaaa")
     
     legend("bottomleft",
-           legend = c("Tier 1", "Tier 2", "Tier 3"),
-           fill   = c("#1a9641", "#f4d03f", "#d7191c"),
+           legend = c("Tier 1", "Tier 2", "Tier 3", "Malaria present, not eligible"),
+           fill   = c("#1a9641", "#f4d03f", "#d7191c", "#b0c4d8"),
            border = "grey40",
            bty    = "o", bg = "white", box.col = "grey80",
            cex    = 0.85, xpd = TRUE, title.font = 2)
@@ -387,14 +411,27 @@ server <- function(input, output, session) {
   
   output$cov_table <- renderTable({
     res    <- tier_weighted(); tr <- if (is.list(res)) res$tier else res
-    n_afro <- nrow(ADMIN0_A)   # total sub-Saharan Africa countries = denominator
+    n_afro <- nrow(ADMIN0_A)   # total SSA countries = denominator
     
-    area <- function(m) {
-      a <- as.numeric(global(mask(CELL_AREA_KM2, m), "sum", na.rm=TRUE)[1,1])
-      format(round(if (is.finite(a)) a else 0), big.mark=",")
+    # Raw km² for a mask raster
+    area_km2_raw <- function(m) {
+      a <- as.numeric(global(mask(CELL_AREA_KM2, m), "sum", na.rm = TRUE)[1, 1])
+      if (is.finite(a)) a else 0
     }
+    
+    # km² formatted with % of species range in brackets
+    area_fmt <- function(m, sp_range_km2) {
+      a <- area_km2_raw(m)
+      s <- format(round(a), big.mark = ",")
+      if (is.finite(sp_range_km2) && sp_range_km2 > 0)
+        s <- paste0(s, " (", formatC(100 * a / sp_range_km2, format = "f", digits = 1),
+                    "% of species range)")
+      s
+    }
+    
+    # Country count using cell centres only (no touches)
     cnt <- function(m) {
-      cid <- rasterize(ADMIN0_A, m, field=seq_len(nrow(ADMIN0_A)), touches=TRUE)
+      cid <- rasterize(ADMIN0_A, m, field = seq_len(nrow(ADMIN0_A)), touches = FALSE)
       hit <- !is.na(cid) & !is.na(m)
       length(unique(na.omit(values(ifel(hit, cid, NA)))))
     }
@@ -403,16 +440,25 @@ server <- function(input, output, session) {
       paste0(n, " / ", n_afro, " (", round(100 * n / n_afro, 1), "%)")
     }
     
+    # Species range denominator: occurrence >= 10%, masked to SSA
+    sp       <- input$species
+    base_p   <- rast(file.path(data_dir, paste0(sp, "_aligned.tif")))
+    sp_mask  <- ifel(!is.na(base_p) & base_p >= 0.10, 1, NA)
+    sp_mask  <- mask(sp_mask, ADMIN0_A)
+    sp_range <- area_km2_raw(sp_mask)
+    
     m1   <- ifel(tr == 1, 1, NA)
     m12  <- ifel(tr <= 2 & !is.na(tr), 1, NA)
     m123 <- ifel(!is.na(tr), 1, NA)
     
     data.frame(
-      Tier        = c("Tier 1",
-                      "Tier 1 + 2 (cumulative)",
-                      "Tier 1 + 2 + 3 (cumulative)"),
-      Countries   = c(cnt_fmt(m1), cnt_fmt(m12), cnt_fmt(m123)),
-      "Area (km2)" = c(area(m1), area(m12), area(m123)),
+      Tier         = c("Tier 1",
+                       "Tier 1 + 2 (cumulative)",
+                       "Tier 1 + 2 + 3 (cumulative)"),
+      Countries    = c(cnt_fmt(m1), cnt_fmt(m12), cnt_fmt(m123)),
+      "Area (km²)" = c(area_fmt(m1, sp_range),
+                       area_fmt(m12, sp_range),
+                       area_fmt(m123, sp_range)),
       check.names = FALSE
     )
   })
@@ -428,7 +474,7 @@ server <- function(input, output, session) {
       v <- as.numeric(global(mask(bur_valid,m),"sum",na.rm=TRUE)[1,1])
       if (!is.finite(v)) v <- 0
       paste0(format(round(v), big.mark=","),
-             " (", formatC(100*v/afro_bur, format="f", digits=2), "% sub-Saharan Africa)")
+             " (", formatC(100*v/afro_bur, format="f", digits=2), "% SSA)")
     }
     averted <- function(m, eff) {
       v <- as.numeric(global(mask(bur_valid,m),"sum",na.rm=TRUE)[1,1])

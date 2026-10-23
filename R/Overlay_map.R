@@ -6,6 +6,7 @@ library(shiny)
 library(terra)
 library(sf)
 
+# Data folder must be in the same directory as this script
 data_dir <- "data"
 
 paths <- list(
@@ -27,7 +28,7 @@ to01 <- function(r) {
 }
 safe_div    <- function(num, den, eps = 1e-9) num / (den + eps)
 fast_align  <- function(r, template, method = "bilinear") {
-  if (!identical(crs(r), crs(template))) project(r, template, method = method)
+  if (!same.crs(r, template)) project(r, template, method = method)
   else resample(r, template, method = method)
 }
 
@@ -52,14 +53,14 @@ NEIGH_ISO <- c("ZWE","ZMB","MWI","TZA","ZAF","SWZ")
 NEIGH     <- vect(a0[a0$GID_0 %in% NEIGH_ISO, ])
 
 PFPR_MEAN <- rast(paths$pfpr)
-ADMIN0_P  <- if (!identical(crs(ADMIN0), crs(PFPR_MEAN))) project(ADMIN0, crs(PFPR_MEAN)) else ADMIN0
+ADMIN0_P  <- if (!same.crs(ADMIN0, PFPR_MEAN)) project(ADMIN0, crs(PFPR_MEAN)) else ADMIN0
 TEMPLATE  <- crop(PFPR_MEAN, ADMIN0_P, snap = "out")
-ADMIN0_A  <- if (!identical(crs(ADMIN0),  crs(TEMPLATE))) project(ADMIN0,  crs(TEMPLATE)) else ADMIN0
-ADMIN1_A  <- if (!identical(crs(ADMIN1),  crs(TEMPLATE))) project(ADMIN1,  crs(TEMPLATE)) else ADMIN1
-AFRICA0_A <- if (!identical(crs(AFRICA0), crs(TEMPLATE))) project(AFRICA0, crs(TEMPLATE)) else AFRICA0
-MOZ0_A    <- if (!identical(crs(MOZ0),    crs(TEMPLATE))) project(MOZ0,    crs(TEMPLATE)) else MOZ0
-MOZ1_A    <- if (!identical(crs(MOZ1),    crs(TEMPLATE))) project(MOZ1,    crs(TEMPLATE)) else MOZ1
-NEIGH_A   <- if (!identical(crs(NEIGH),   crs(TEMPLATE))) project(NEIGH,   crs(TEMPLATE)) else NEIGH
+ADMIN0_A  <- if (!same.crs(ADMIN0,  TEMPLATE)) project(ADMIN0,  crs(TEMPLATE)) else ADMIN0
+ADMIN1_A  <- if (!same.crs(ADMIN1,  TEMPLATE)) project(ADMIN1,  crs(TEMPLATE)) else ADMIN1
+AFRICA0_A <- if (!same.crs(AFRICA0, TEMPLATE)) project(AFRICA0, crs(TEMPLATE)) else AFRICA0
+MOZ0_A    <- if (!same.crs(MOZ0,    TEMPLATE)) project(MOZ0,    crs(TEMPLATE)) else MOZ0
+MOZ1_A    <- if (!same.crs(MOZ1,    TEMPLATE)) project(MOZ1,    crs(TEMPLATE)) else MOZ1
+NEIGH_A   <- if (!same.crs(NEIGH,   TEMPLATE)) project(NEIGH,   crs(TEMPLATE)) else NEIGH
 
 PFPR_ALIGNED <- to01(fast_align(PFPR_MEAN, TEMPLATE))
 ITN_ALIGNED  <- to01(fast_align(rast(paths$itn), TEMPLATE))
@@ -288,6 +289,16 @@ server <- function(input, output, session) {
       rect(xmin(moz_ext), ymin(moz_ext), xmax(moz_ext), ymax(moz_ext),
            border = "black", lwd = 1.8)
     }
+    
+    legend("bottomleft",
+           legend  = unname(zone_labels),
+           fill    = unname(zone_cols),
+           border  = "grey40",
+           bty     = "o",
+           bg      = "white",
+           box.col = "grey80",
+           cex     = 0.72,
+           xpd     = TRUE)
   }
   
   # ── Tab 1: SSA overview ──────────────────────────────────────
@@ -302,6 +313,7 @@ server <- function(input, output, session) {
   
   # ── Tab 2: Mozambique zoom ────────────────────────────────────
   output$map_moz <- renderPlot({
+    
     # Layout: main map + small locator in bottom-right corner
     lay_mat <- matrix(c(1,1,1,
                         1,1,1,
@@ -311,15 +323,12 @@ server <- function(input, output, session) {
     # Main Mozambique map
     par(mar = c(0.2, 0.2, 0.2, 0.2), bg = "white")
     
-    # Neighbours first
     plot(NEIGH_MOZ, col = "#e8e8e8", border = "#cccccc", lwd = 0.3,
          axes = FALSE, main = "",
          xlim = moz_xlim, ylim = moz_ylim)
     
-    # Mozambique background
     plot(MOZ0_A, col = "#f5f5f5", border = NA, add = TRUE)
     
-    # Zone raster
     if (length(vals_moz) > 0) {
       plot(zr_moz, add = TRUE,
            col    = zone_cols[as.character(vals_moz)],
@@ -327,18 +336,26 @@ server <- function(input, output, session) {
            legend = FALSE, axes = FALSE)
     }
     
-    # Province borders and country border
     plot(v1_moz, add = TRUE, lwd = 0.7, col = NA, border = "#888888")
     plot(MOZ0_A, add = TRUE, lwd = 2.0, col = NA, border = "black")
     
-    # Province labels
     if ("NAME_1" %in% names(MOZ1_A)) {
       cents  <- centroids(MOZ1_A)
       coords <- crds(cents)
       text(coords[,1], coords[,2],
            labels = MOZ1_A$NAME_1,
-           cex = 0.75, col = "grey20", font = 1)
+           cex = 1.5, col = "#111111", font = 2)
     }
+    
+    legend("bottomleft",
+           legend  = unname(zone_labels),
+           fill    = unname(zone_cols),
+           border  = "grey40",
+           bty     = "o",
+           bg      = "white",
+           box.col = "grey80",
+           cex     = 0.72,
+           xpd     = TRUE)
     
     # Locator inset panel
     par(mar = c(0.3, 0.3, 0.3, 0.3), bg = "white")

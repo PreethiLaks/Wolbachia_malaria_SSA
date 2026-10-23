@@ -15,7 +15,7 @@ to01 <- function(r) {
 }
 
 fast_align <- function(r, template, method = "bilinear") {
-  if (!identical(crs(r), crs(template))) project(r, template, method = method)
+  if (!same.crs(r, template)) project(r, template, method = method)
   else resample(r, template, method = method)
 }
 
@@ -35,6 +35,12 @@ POP_ALIGNED   <- rast(file.path(data_dir, "pop_aligned.tif"))
 CELL_AREA_KM2 <- rast(file.path(data_dir, "cell_area_km2.tif"))
 TEMPLATE      <- PFPR_ALIGNED
 
+# Ensure all boundary vectors share the raster CRS
+if (!same.crs(ADMIN0_A,  TEMPLATE)) ADMIN0_A  <- project(ADMIN0_A,  crs(TEMPLATE))
+if (!same.crs(ADMIN1_A,  TEMPLATE)) ADMIN1_A  <- project(ADMIN1_A,  crs(TEMPLATE))
+if (!same.crs(AFRICA0_A, TEMPLATE)) AFRICA0_A <- project(AFRICA0_A, crs(TEMPLATE))
+if (!same.crs(AFRICA1_A, TEMPLATE)) AFRICA1_A <- project(AFRICA1_A, crs(TEMPLATE))
+
 # UC4 specific — stephensi and GHS
 STE_ALIGNED   <- rast(file.path(data_dir, "stephensi_aligned.tif"))
 GHS_ALIGNED   <- rast(file.path(data_dir, "ghs_aligned.tif"))
@@ -42,11 +48,12 @@ GHS_ALIGNED   <- rast(file.path(data_dir, "ghs_aligned.tif"))
 ghs_min    <- 21
 ste_floor  <- 0.10
 
-# Stephensi urban area for coverage metrics
-ste_urban  <- ifel(!is.na(GHS_ALIGNED) & GHS_ALIGNED >= ghs_min &
-                     !is.na(STE_ALIGNED) & STE_ALIGNED >= ste_floor, 1, NA)
-ste_urban  <- mask(ste_urban, ADMIN0_A)
-STE_URBAN_AREA <- as.numeric(global(mask(CELL_AREA_KM2, ste_urban),
+# Stephensi range denominator: full range where stephensi is present and population > 0
+# (not restricted to urban — the urban filter is for the intervention map, not the denominator)
+ste_range  <- ifel(!is.na(STE_ALIGNED) & STE_ALIGNED >= ste_floor &
+                     !is.na(POP_ALIGNED) & POP_ALIGNED > 0, 1, NA)
+ste_range  <- mask(ste_range, ADMIN0_A)
+STE_URBAN_AREA <- as.numeric(global(mask(CELL_AREA_KM2, ste_range),
                                     "sum", na.rm=TRUE)[1,1])
 
 cat("Data loaded.\n")
@@ -70,6 +77,7 @@ ui <- fluidPage(
     .tier-legend { display: flex; gap: 12px; margin: 8px 0; }
     .tier-chip { padding: 4px 10px; border-radius: 12px; font-size: 0.82em;
                  font-weight: bold; color: white; }
+    .tier-summary { font-size: 0.82em; color: #444; margin-top: 4px; margin-bottom: 10px; }
   "))),
   
   titlePanel(
@@ -92,18 +100,46 @@ ui <- fluidPage(
                  hr(),
                  h4("An. stephensi occurrence"),
                  helpText("Higher occurrence probability = better. Score 1 = high predicted presence."),
+                 selectInput("ste_preset", "Threshold preset:",
+                             choices  = c("Strict"             = "strict",
+                                          "Moderate (default)" = "moderate",
+                                          "Relaxed"            = "relaxed",
+                                          "Custom"             = "custom"),
+                             selected = "moderate"),
                  sliderInput("ste_t1", "Score 1 minimum occurrence (%)",
                              min = 30, max = 90, value = 70, step = 5),
                  sliderInput("ste_t2", "Score 2 minimum occurrence (%)",
                              min = 10, max = 80, value = 40, step = 5),
+                 div(class = "tier-summary",
+                     tags$span(style="color:#1a9641; font-weight:bold;", "Score 1 (best): "),
+                     textOutput("ste_score1_label", inline = TRUE), " | ",
+                     tags$span(style="color:#b8860b; font-weight:bold;", "Score 2: "),
+                     textOutput("ste_score2_label", inline = TRUE), " | ",
+                     tags$span(style="color:#d7191c; font-weight:bold;", "Score 3: "),
+                     textOutput("ste_score3_label", inline = TRUE)
+                 ),
                  
                  hr(),
                  h4("Malaria transmission (PfPR)"),
-                 helpText("Moderate PfPR = best (15\u201340%). Score 1 = PfPR in this sweet spot."),
+                 helpText("Moderate PfPR = best. Score 1 = sweet spot; Score 2 = 5% to lower bound; Score 3 = <5%. Cells above upper bound excluded (high PfPR likely driven by native vectors)."),
+                 selectInput("pfpr_preset", "Threshold preset:",
+                             choices  = c("Strict"             = "strict",
+                                          "Moderate (default)" = "moderate",
+                                          "Relaxed"            = "relaxed",
+                                          "Custom"             = "custom"),
+                             selected = "moderate"),
                  sliderInput("pfpr_lo", "PfPR lower bound for Score 1 (%)",
                              min = 5, max = 30, value = 15, step = 1),
                  sliderInput("pfpr_hi", "PfPR upper bound for Score 1 (%)",
                              min = 20, max = 60, value = 40, step = 1),
+                 div(class = "tier-summary",
+                     tags$span(style="color:#1a9641; font-weight:bold;", "Score 1 (sweet spot): "),
+                     textOutput("pfpr_score1_label", inline = TRUE), " | ",
+                     tags$span(style="color:#b8860b; font-weight:bold;", "Score 2 (buffer): "),
+                     textOutput("pfpr_score2_label", inline = TRUE), " | ",
+                     tags$span(style="color:#d7191c; font-weight:bold;", "Score 3 / excluded: "),
+                     textOutput("pfpr_score3_label", inline = TRUE)
+                 ),
                  
                  hr(),
                  h4("Display"),
@@ -140,6 +176,38 @@ ui <- fluidPage(
 
 server <- function(input, output, session) {
   
+  # Preset values for stephensi and PfPR
+  ste_presets  <- list(strict=c(80,55), moderate=c(70,40), relaxed=c(60,30))
+  pfpr_presets <- list(strict=c(20,35), moderate=c(15,40), relaxed=c(10,50))
+  
+  # Update stephensi sliders when preset changes
+  observeEvent(input$ste_preset, {
+    if (input$ste_preset != "custom") {
+      vals <- ste_presets[[input$ste_preset]]
+      updateSliderInput(session, "ste_t1", value = vals[1])
+      updateSliderInput(session, "ste_t2", value = vals[2])
+    }
+  })
+  
+  # Update PfPR sliders when preset changes
+  observeEvent(input$pfpr_preset, {
+    if (input$pfpr_preset != "custom") {
+      vals <- pfpr_presets[[input$pfpr_preset]]
+      updateSliderInput(session, "pfpr_lo", value = vals[1])
+      updateSliderInput(session, "pfpr_hi", value = vals[2])
+    }
+  })
+  
+  # Tier summary labels — stephensi
+  output$ste_score1_label <- renderText({ paste0("≥", input$ste_t1, "%") })
+  output$ste_score2_label <- renderText({ paste0(input$ste_t2, "–", input$ste_t1, "%") })
+  output$ste_score3_label <- renderText({ paste0("<", input$ste_t2, "%") })
+  
+  # Tier summary labels — PfPR
+  output$pfpr_score1_label <- renderText({ paste0(input$pfpr_lo, "–", input$pfpr_hi, "%") })
+  output$pfpr_score2_label <- renderText({ paste0("5–", input$pfpr_lo, "%") })
+  output$pfpr_score3_label <- renderText({ paste0("<5% or >", input$pfpr_hi, "% (excluded)") })
+  
   tier_uc4 <- reactive({
     ste_k1   <- input$ste_t1 / 100
     ste_k2   <- input$ste_t2 / 100
@@ -155,14 +223,14 @@ server <- function(input, output, session) {
     ts[urban & ste_ok & STE_ALIGNED <  ste_k2] <- 3
     
     tp <- rast(TEMPLATE); values(tp) <- NA
-    tp[urban & ste_ok & PFPR_ALIGNED >= pfpr_lo & PFPR_ALIGNED <= pfpr_hi] <- 1
-    tp[urban & ste_ok & ((PFPR_ALIGNED >= pfpr_hi * 0.5 & PFPR_ALIGNED < pfpr_lo) |
-                           (PFPR_ALIGNED > pfpr_hi & PFPR_ALIGNED <= pfpr_hi * 1.5))] <- 2
-    tp[urban & ste_ok & !is.na(PFPR_ALIGNED)] <- 3
-    tp[urban & ste_ok & PFPR_ALIGNED >= pfpr_lo & PFPR_ALIGNED <= pfpr_hi] <- 1
-    tp[urban & ste_ok & PFPR_ALIGNED >= (pfpr_lo * 0.5) & PFPR_ALIGNED < pfpr_lo] <- 2
-    tp[urban & ste_ok & PFPR_ALIGNED > pfpr_hi & PFPR_ALIGNED <= (pfpr_hi * 1.5)] <- 2
-    tp[urban & ste_ok & (PFPR_ALIGNED < (pfpr_lo * 0.5) | PFPR_ALIGNED > (pfpr_hi * 1.5))] <- 3
+    # Only cells with PfPR <= pfpr_hi are eligible (>pfpr_hi excluded — likely driven by native vectors)
+    pfpr_ok <- !is.na(PFPR_ALIGNED) & PFPR_ALIGNED <= pfpr_hi
+    # Score 3: PfPR < 5% (too low — limited Wolbachia impact)
+    tp[urban & ste_ok & pfpr_ok & PFPR_ALIGNED < 0.05] <- 3
+    # Score 2: PfPR 5% to pfpr_lo (suboptimal but eligible)
+    tp[urban & ste_ok & pfpr_ok & PFPR_ALIGNED >= 0.05 & PFPR_ALIGNED < pfpr_lo] <- 2
+    # Score 1: PfPR pfpr_lo to pfpr_hi (optimal sweet spot)
+    tp[urban & ste_ok & pfpr_ok & PFPR_ALIGNED >= pfpr_lo & PFPR_ALIGNED <= pfpr_hi] <- 1
     
     sc  <- ts + tp
     out <- rast(TEMPLATE); values(out) <- NA
@@ -187,7 +255,7 @@ server <- function(input, output, session) {
     zoom_iso <- input$zoom_country
     if (nchar(zoom_iso) > 0) {
       ctry_v <- vect(afro_sf[afro_sf$GID_0 == zoom_iso, ])
-      ctry_v <- if (!identical(crs(ctry_v), crs(TEMPLATE))) project(ctry_v, crs(TEMPLATE)) else ctry_v
+      ctry_v <- if (!same.crs(ctry_v, TEMPLATE)) project(ctry_v, crs(TEMPLATE)) else ctry_v
       ce    <- ext(ctry_v)
       dx    <- diff(c(xmin(ce), xmax(ce))); dy <- diff(c(ymin(ce), ymax(ce)))
       pad   <- max(dx, dy) * 0.25
@@ -238,36 +306,52 @@ server <- function(input, output, session) {
   output$map_uc4 <- renderPlot({ plot_tier(tier_uc4(), "") })
   
   output$cov_table <- renderTable({
-    tr  <- tier_uc4()
-    m1  <- ifel(tr == 1, 1, NA)
-    m12 <- ifel(tr <= 2 & !is.na(tr), 1, NA)
-    area <- function(m) {
+    tr   <- tier_uc4()
+    n_afro <- nrow(ADMIN0_A)
+    m1   <- ifel(tr == 1, 1, NA)
+    m12  <- ifel(tr <= 2 & !is.na(tr), 1, NA)
+    m123 <- ifel(!is.na(tr), 1, NA)
+    
+    area_raw <- function(m) {
       a <- as.numeric(global(mask(CELL_AREA_KM2, m), "sum", na.rm=TRUE)[1,1])
       if (!is.finite(a)) 0 else a
     }
-    pct_ste <- function(m) {
-      a <- area(m)
-      paste0(formatC(100 * a / STE_URBAN_AREA, format="f", digits=2), "% of stephensi range")
+    area_fmt <- function(m) {
+      a <- area_raw(m)
+      paste0(format(round(a), big.mark=","),
+             " (", formatC(100 * a / STE_URBAN_AREA, format="f", digits=1), "% of An. stephensi range)")
+    }
+    cnt_fmt <- function(m) {
+      cid <- rasterize(ADMIN0_A, m, field = seq_len(nrow(ADMIN0_A)), touches = FALSE)
+      hit <- !is.na(cid) & !is.na(m)
+      n   <- length(unique(na.omit(values(ifel(hit, cid, NA)))))
+      paste0(n, " / ", n_afro, " (", round(100 * n / n_afro, 1), "%)")
     }
     data.frame(
-      Tier = c("Tier 1", "Tier 1 + 2 (cumulative)"),
-      `Area (km²)` = format(round(c(area(m1), area(m12))), big.mark=","),
-      `% of stephensi range` = c(pct_ste(m1), pct_ste(m12)),
+      Tier      = c("Tier 1", "Tier 1 + 2 (cumulative)", "Tier 1 + 2 + 3 (cumulative)"),
+      Countries = c(cnt_fmt(m1), cnt_fmt(m12), cnt_fmt(m123)),
+      `Area km² (% of An. stephensi range)` = c(area_fmt(m1), area_fmt(m12), area_fmt(m123)),
       check.names = FALSE
     )
   })
   
   output$pop_table <- renderTable({
-    tr  <- tier_uc4()
-    m1  <- ifel(tr == 1, 1, NA)
-    m12 <- ifel(tr <= 2 & !is.na(tr), 1, NA)
-    pop <- function(m) {
+    tr   <- tier_uc4()
+    m1   <- ifel(tr == 1, 1, NA)
+    m12  <- ifel(tr <= 2 & !is.na(tr), 1, NA)
+    m123 <- ifel(!is.na(tr), 1, NA)
+    pop_total <- as.numeric(global(mask(POP_ALIGNED,
+                                        ifel(!is.na(POP_ALIGNED) & POP_ALIGNED > 0, 1, NA)),
+                                   "sum", na.rm=TRUE)[1,1])
+    pop_fmt <- function(m) {
       p <- as.numeric(global(mask(POP_ALIGNED, m), "sum", na.rm=TRUE)[1,1])
-      format(round(if (!is.finite(p)) 0 else p), big.mark=",")
+      if (!is.finite(p)) p <- 0
+      paste0(format(round(p / 1e6, 2), nsmall = 2), "M",
+             " (", formatC(100 * p / pop_total, format="f", digits=1), "% SSA)")
     }
     data.frame(
-      Tier = c("Tier 1", "Tier 1 + 2 (cumulative)"),
-      `Population at risk` = c(pop(m1), pop(m12)),
+      Tier = c("Tier 1", "Tier 1 + 2 (cumulative)", "Tier 1 + 2 + 3 (cumulative)"),
+      `Urban population at risk` = c(pop_fmt(m1), pop_fmt(m12), pop_fmt(m123)),
       check.names = FALSE
     )
   })
