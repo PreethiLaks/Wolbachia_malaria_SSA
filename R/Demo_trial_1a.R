@@ -35,8 +35,6 @@ afro_sf         <- bounds$afro_sf
 
 PFPR_ALIGNED  <- rast(file.path(data_dir, "pfpr_aligned.tif"))
 ITN_ALIGNED   <- rast(file.path(data_dir, "itn_aligned.tif"))
-INC_ALIGNED   <- rast(file.path(data_dir, "inc_aligned.tif"))
-BURDEN_GLOBAL <- rast(file.path(data_dir, "burden_aligned.tif"))
 CELL_AREA_KM2 <- rast(file.path(data_dir, "cell_area_km2.tif"))
 TEMPLATE      <- PFPR_ALIGNED
 
@@ -204,9 +202,6 @@ ui <- fluidPage(
                          br(),
                          h4("Coverage"),
                          tableOutput("cov_table"),
-                         hr(),
-                         h4("Burden"),
-                         tableOutput("burden_table")
                 ),
                 tabPanel("Sensitivity",
                          br(),
@@ -487,29 +482,6 @@ server <- function(input, output, session) {
     )
   })
   
-  output$burden_table <- renderTable({
-    res <- tier_weighted(); tr <- if (is.list(res)) res$tier else res
-    bur_valid <- mask(BURDEN_GLOBAL,
-                      ifel(!is.na(INC_ALIGNED) & !is.na(POP_ALIGNED) &
-                             POP_ALIGNED>0 & INC_ALIGNED>1e-12, 1, NA))
-    afro_bur  <- as.numeric(global(bur_valid, "sum", na.rm=TRUE)[1,1])
-    bur <- function(m) {
-      v <- as.numeric(global(mask(bur_valid,m),"sum",na.rm=TRUE)[1,1])
-      if (!is.finite(v)) v <- 0
-      paste0(format(round(v), big.mark=","),
-             " (", formatC(100*v/afro_bur, format="f", digits=2), "% SSA)")
-    }
-    m1   <- ifel(tr == 1, 1, NA)
-    m12  <- ifel(tr <= 2 & !is.na(tr), 1, NA)
-    m123 <- ifel(!is.na(tr), 1, NA)
-    data.frame(
-      Tier = c("Tier 1",
-               "Tier 1 + 2 (cumulative)",
-               "Tier 1 + 2 + 3 (cumulative)"),
-      `Mean annual burden` = c(bur(m1), bur(m12), bur(m123)),
-      check.names = FALSE
-    )
-  })
   
   # Sensitivity — compute on demand when tab is opened
   sens_data <- reactive({
